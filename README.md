@@ -1,2 +1,2 @@
-My Small Website Hosted on Github
+*My Small Website Hosted on Github*
 
