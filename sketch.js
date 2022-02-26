@@ -1,65 +1,107 @@
+// Copyright (c) 2019 ml5
+//
+// This software is released under the MIT License.
+// https://opensource.org/licenses/MIT
+
+/* ===
+ml5 Example
+SketchRNN
+=== */
+
+// The SketchRNN model
 let model;
-let dx, dy; // offsets of the pen strokes, in pixels
-let pen_down, pen_up, pen_end; // keep track of whether pen is touching paper
-let x, y; // absolute coordinates on the screen of where the pen is
-let prev_pen = [1, 0, 0]; // group all p0, p1, p2 together
-let rnn_state; // store the hidden states of rnn's neurons
-let pdf; // store all the parameters of a mixture-density distribution
-let temperature = 0.45; // controls the amount of uncertainty of the model
-let line_color;
-let model_loaded = false;
+// Start by drawing
+let previousPen = "down";
+// Current location of drawing
+let x, y;
+// The current "stroke" of the drawing
+let strokePath;
+let button;
 
-// loads the TensorFlow.js version of sketch-rnn model, with the "cat" model's weights.
-model = new ms.SketchRNN("https://storage.googleapis.com/quickdraw-models/sketchRNN/models/cat.gen.json");
-// code that ensures the above line is run before the below lines are run.
+let canvas, ctx;
 
-function setup() {
-  x = windowWidth / 2.0;
-  y = windowHeight / 3.0;
-  createCanvas(windowWidth, windowHeight);
-  frameRate(60);
+const width = 640;
+const height = 480;
 
-  // Initialize the scale factor for the model. Bigger -> large outputs.
-  model.setPixelFactor(3.0);
+async function setup() {
+  canvas = createCanvas(640, 480);
+  ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ebedef";
+  ctx.fillRect(0, 0, width, height);
 
-  // Initialize pen's states to zero.
-  [dx, dy, pen_down, pen_up, pen_end] = model.zeroInput(); // The pen's states.
+  // See a list of all supported models: https://github.com/ml5js/ml5-library/blob/master/src/SketchRNN/models.js
+  model = await ml5.sketchRNN("cat");
 
-  // Zero out the rnn's initial states.
-  rnn_state = model.zeroState();
+  // Button to reset drawing
+  button = document.querySelector("#clearBtn");
+  button.addEventListener("click", startDrawing);
 
-  // Define color of line.
-  line_color = color(random(64, 224), random(64, 224), random(64, 224));
-};
+  // run sketchRNN
+  startDrawing();
+
+  requestAnimationFrame(draw);
+}
+setup();
+
+function modelReady() {
+  console.log("model loaded");
+  startDrawing();
+}
+
+// Reset the drawing
+function startDrawing() {
+  clearCanvas();
+  // Start in the middle
+  x = width / 2;
+  y = height / 2;
+  model.reset();
+  // Generate the first stroke path
+  model.generate(gotStroke);
+}
 
 function draw() {
-  // See if we finished drawing.
-  if (prev_pen[2] == 1) {
-    noLoop(); // Stop drawing.
-    return;
+  requestAnimationFrame(draw);
+  // If something new to draw
+  if (strokePath) {
+    // If the pen is down, draw a line
+    if (previousPen === "down") {
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 3;
+
+      ctx.beginPath();
+      ctx.lineCap = "round";
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + strokePath.dx, y + strokePath.dy);
+      ctx.stroke();
+    }
+    // Move the pen
+    x += strokePath.dx;
+    y += strokePath.dy;
+    // The pen state actually refers to the next stroke
+    previousPen = strokePath.pen;
+
+    // If the drawing is complete
+    if (strokePath.pen !== "end") {
+      strokePath = null;
+      model.generate(gotStroke);
+    }
   }
+}
 
-  // Using the previous pen states, and hidden state, get next hidden state
-  // the below line takes the most CPU power, especially for large models.
-  rnn_state = model.update([dx, dy, pen_down, pen_up, pen_end], rnn_state);
+// A new stroke path
+function gotStroke(err, s) {
+  strokePath = s;
+}
 
-  // Get the parameters of the probability distribution (pdf) from hidden state.
-  pdf = model.getPDF(rnn_state, temperature);
+function clearCanvas() {
+  ctx.fillStyle = "#ebedef";
+  ctx.fillRect(0, 0, width, height);
+}
 
-  // Sample the next pen's states from our probability distribution.
-  [dx, dy, pen_down, pen_up, pen_end] = model.sample(pdf);
-
-  // Only draw on the paper if the pen is touching the paper.
-  if (prev_pen[0] == 1) {
-    stroke(line_color);
-    strokeWeight(3.0);
-    line(x, y, x+dx, y+dy); // Draw line connecting prev point to current point.
-  }
-
-  // Update the absolute coordinates from the offsets
-  x += dx;
-  y += dy;
-
-  // Update the previous pen's state to the current one we just sampled
-  prev_pen = [pen_down, pen_up, pen_end];
-};
+function createCanvas(w, h) {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  document.body.appendChild(canvas);
+  return canvas;
+}
